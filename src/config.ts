@@ -9,7 +9,7 @@ import type {
  * Default server configuration
  */
 export const defaultServerConfig: ServerConfig = {
-  port: parseInt(process.env.PORT || '3000', 10),
+  port: parseInt(process.env.PORT || '8080', 10),
   host: process.env.HOST || '127.0.0.1',
   timeout: parseInt(process.env.FETCH_TIMEOUT || '10000', 10),
 };

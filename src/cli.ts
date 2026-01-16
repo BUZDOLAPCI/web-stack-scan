@@ -9,7 +9,7 @@ import type { TransportType } from './server.js';
 function parseArgs(): { transport: TransportType; port?: number; host?: string } {
   const args = process.argv.slice(2);
 
-  let transport: TransportType = 'stdio';
+  let transport: TransportType = 'http';
   let port: number | undefined;
   let host: string | undefined;
 
@@ -72,9 +72,9 @@ USAGE:
   web-stack-scan [OPTIONS]
 
 OPTIONS:
-  --stdio, -s     Use stdio transport (default)
-  --http, -h      Use HTTP transport
-  --port, -p      Port for HTTP server (default: 3000)
+  --stdio, -s     Use stdio transport
+  --http, -h      Use HTTP transport (default)
+  --port, -p      Port for HTTP server (default: 8080)
   --host          Host for HTTP server (default: 127.0.0.1)
   --version, -v   Print version
   --help          Print this help message
@@ -90,7 +90,7 @@ EXAMPLES:
   web-stack-scan --http --host 0.0.0.0 --port 3000
 
 ENVIRONMENT VARIABLES:
-  PORT           HTTP server port (default: 3000)
+  PORT           HTTP server port (default: 8080)
   HOST           HTTP server host (default: 127.0.0.1)
   FETCH_TIMEOUT  Timeout for fetching URLs in ms (default: 10000)
 `);

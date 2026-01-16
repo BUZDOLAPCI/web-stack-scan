@@ -43,4 +43,4 @@ export { startServer, startStdioTransport, startHttpTransport } from './server.j
 export type { TransportType, StartServerOptions } from './server.js';
 
 // Transport
-export { createApp } from './transport/http.js';
+export { createHttpServer, startHttpTransport as startHttpServer } from './transport/http.js';
