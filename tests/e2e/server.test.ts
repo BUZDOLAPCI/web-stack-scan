@@ -1,20 +1,20 @@
 import { describe, it, expect, beforeAll, afterAll, vi, beforeEach, afterEach } from 'vitest';
-import { createApp } from '../../src/transport/http.js';
-import type { Express } from 'express';
+import { createHttpServer } from '../../src/transport/http.js';
+import type { Server } from 'http';
 
-// Simple test client for the Express app
+// Simple test client for the HTTP server
 async function request(
-  app: Express,
+  server: Server,
   method: 'GET' | 'POST',
   path: string,
   body?: unknown
 ): Promise<{ status: number; body: unknown }> {
   return new Promise((resolve, reject) => {
     const http = require('http');
-    const server = app.listen(0, '127.0.0.1', () => {
-      const address = server.address();
+    const testServer = server.listen(0, '127.0.0.1', () => {
+      const address = testServer.address();
       if (!address || typeof address === 'string') {
-        server.close();
+        testServer.close();
         reject(new Error('Failed to get server address'));
         return;
       }
@@ -35,7 +35,7 @@ async function request(
           data += chunk;
         });
         res.on('end', () => {
-          server.close();
+          testServer.close();
           try {
             resolve({
               status: res.statusCode,
@@ -51,7 +51,7 @@ async function request(
       });
 
       req.on('error', (err: Error) => {
-        server.close();
+        testServer.close();
         reject(err);
       });
 
@@ -64,15 +64,20 @@ async function request(
 }
 
 describe('HTTP Server E2E', () => {
-  let app: Express;
+  let server: Server;
 
   beforeAll(() => {
-    app = createApp();
+    server = createHttpServer();
+  });
+
+  afterAll(() => {
+    server.close();
   });
 
   describe('Health endpoint', () => {
     it('should return health status', async () => {
-      const response = await request(app, 'GET', '/health');
+      const testServer = createHttpServer();
+      const response = await request(testServer, 'GET', '/health');
 
       expect(response.status).toBe(200);
       expect(response.body).toEqual({
@@ -84,7 +89,8 @@ describe('HTTP Server E2E', () => {
 
   describe('MCP endpoint', () => {
     it('should return server info on initialize', async () => {
-      const response = await request(app, 'POST', '/mcp', {
+      const testServer = createHttpServer();
+      const response = await request(testServer, 'POST', '/mcp', {
         jsonrpc: '2.0',
         id: 1,
         method: 'initialize',
@@ -98,7 +104,8 @@ describe('HTTP Server E2E', () => {
     });
 
     it('should list available tools', async () => {
-      const response = await request(app, 'POST', '/mcp', {
+      const testServer = createHttpServer();
+      const response = await request(testServer, 'POST', '/mcp', {
         jsonrpc: '2.0',
         id: 2,
         method: 'tools/list',
@@ -125,7 +132,8 @@ describe('HTTP Server E2E', () => {
         </html>
       `;
 
-      const response = await request(app, 'POST', '/mcp', {
+      const testServer = createHttpServer();
+      const response = await request(testServer, 'POST', '/mcp', {
         jsonrpc: '2.0',
         id: 3,
         method: 'tools/call',
@@ -155,7 +163,8 @@ describe('HTTP Server E2E', () => {
         </html>
       `;
 
-      const response = await request(app, 'POST', '/mcp', {
+      const testServer = createHttpServer();
+      const response = await request(testServer, 'POST', '/mcp', {
         jsonrpc: '2.0',
         id: 4,
         method: 'tools/call',
@@ -173,7 +182,8 @@ describe('HTTP Server E2E', () => {
     });
 
     it('should return error for unknown method', async () => {
-      const response = await request(app, 'POST', '/mcp', {
+      const testServer = createHttpServer();
+      const response = await request(testServer, 'POST', '/mcp', {
         jsonrpc: '2.0',
         id: 5,
         method: 'unknown/method',
@@ -186,7 +196,8 @@ describe('HTTP Server E2E', () => {
     });
 
     it('should return error for unknown tool', async () => {
-      const response = await request(app, 'POST', '/mcp', {
+      const testServer = createHttpServer();
+      const response = await request(testServer, 'POST', '/mcp', {
         jsonrpc: '2.0',
         id: 6,
         method: 'tools/call',
@@ -202,7 +213,8 @@ describe('HTTP Server E2E', () => {
     });
 
     it('should reject invalid JSON-RPC version', async () => {
-      const response = await request(app, 'POST', '/mcp', {
+      const testServer = createHttpServer();
+      const response = await request(testServer, 'POST', '/mcp', {
         jsonrpc: '1.0',
         id: 7,
         method: 'tools/list',
@@ -215,7 +227,8 @@ describe('HTTP Server E2E', () => {
 
   describe('REST API endpoints', () => {
     it('should detect frameworks via REST API', async () => {
-      const response = await request(app, 'POST', '/api/frameworks', {
+      const testServer = createHttpServer();
+      const response = await request(testServer, 'POST', '/api/frameworks', {
         html: '<html><body><div data-reactroot></div></body></html>',
       });
 
@@ -225,7 +238,8 @@ describe('HTTP Server E2E', () => {
     });
 
     it('should detect frameworks with headers via REST API', async () => {
-      const response = await request(app, 'POST', '/api/frameworks', {
+      const testServer = createHttpServer();
+      const response = await request(testServer, 'POST', '/api/frameworks', {
         html: '<html><body></body></html>',
         headers: { 'X-Powered-By': 'Express' },
       });
@@ -235,7 +249,8 @@ describe('HTTP Server E2E', () => {
     });
 
     it('should detect analytics via REST API', async () => {
-      const response = await request(app, 'POST', '/api/analytics', {
+      const testServer = createHttpServer();
+      const response = await request(testServer, 'POST', '/api/analytics', {
         html: '<html><head><script>fbq("track", "PageView");</script></head></html>',
       });
 
@@ -245,14 +260,16 @@ describe('HTTP Server E2E', () => {
     });
 
     it('should return error for missing html parameter', async () => {
-      const response = await request(app, 'POST', '/api/frameworks', {});
+      const testServer = createHttpServer();
+      const response = await request(testServer, 'POST', '/api/frameworks', {});
 
       expect(response.status).toBe(400);
       expect((response.body as any).error).toContain('html');
     });
 
     it('should return error for missing html in analytics', async () => {
-      const response = await request(app, 'POST', '/api/analytics', {});
+      const testServer = createHttpServer();
+      const response = await request(testServer, 'POST', '/api/analytics', {});
 
       expect(response.status).toBe(400);
       expect((response.body as any).error).toContain('html');
@@ -289,7 +306,8 @@ describe('HTTP Server E2E', () => {
         headers: mockHeaders,
       } as Response);
 
-      const response = await request(app, 'POST', '/api/fingerprint', {
+      const testServer = createHttpServer();
+      const response = await request(testServer, 'POST', '/api/fingerprint', {
         url: 'https://example.com',
       });
 
@@ -308,7 +326,8 @@ describe('HTTP Server E2E', () => {
         headers: new Headers({ 'X-Powered-By': 'Express' }),
       } as Response);
 
-      const response = await request(app, 'POST', '/mcp', {
+      const testServer = createHttpServer();
+      const response = await request(testServer, 'POST', '/mcp', {
         jsonrpc: '2.0',
         id: 10,
         method: 'tools/call',
@@ -329,7 +348,8 @@ describe('HTTP Server E2E', () => {
     });
 
     it('should return error for missing url in fingerprint', async () => {
-      const response = await request(app, 'POST', '/api/fingerprint', {});
+      const testServer = createHttpServer();
+      const response = await request(testServer, 'POST', '/api/fingerprint', {});
 
       expect(response.status).toBe(400);
       expect((response.body as any).error).toContain('url');

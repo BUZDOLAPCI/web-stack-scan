@@ -1,5 +1,6 @@
-import { startStdioTransport, startHttpTransport } from './transport/index.js';
+import { startStdioTransport, startHttpTransport, createHttpServer } from './transport/index.js';
 import type { ServerConfig } from './types.js';
+import type { Server } from 'http';
 
 export type TransportType = 'stdio' | 'http';
 
@@ -28,5 +29,13 @@ export function startServer(options: StartServerOptions): void {
   }
 }
 
+/**
+ * Create a standalone HTTP server instance without starting it.
+ * Useful for testing or custom server configurations.
+ */
+export function createStandaloneServer(): Server {
+  return createHttpServer();
+}
+
 // Re-export for convenience
-export { startStdioTransport, startHttpTransport } from './transport/index.js';
+export { startStdioTransport, startHttpTransport, createHttpServer } from './transport/index.js';

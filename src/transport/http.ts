@@ -1,4 +1,4 @@
-import express, { Request, Response, NextFunction } from 'express';
+import { createServer, IncomingMessage, ServerResponse, Server } from 'http';
 import type { JsonRpcRequest, JsonRpcResponse, ServerConfig } from '../types.js';
 import {
   fingerprint,
@@ -11,7 +11,7 @@ import { defaultServerConfig } from '../config.js';
 /**
  * Handle a single JSON-RPC request
  */
-async function handleRequest(request: JsonRpcRequest): Promise<JsonRpcResponse> {
+async function handleJsonRpcRequest(request: JsonRpcRequest): Promise<JsonRpcResponse> {
   const { id, method, params } = request;
 
   try {
@@ -119,108 +119,221 @@ async function handleRequest(request: JsonRpcRequest): Promise<JsonRpcResponse> 
 }
 
 /**
- * Create and configure the Express app
+ * Read the request body as a string
  */
-export function createApp(): express.Application {
-  const app = express();
-
-  // Parse JSON bodies
-  app.use(express.json({ limit: '10mb' }));
-
-  // Health check endpoint
-  app.get('/health', (_req: Request, res: Response) => {
-    res.json({ status: 'ok', service: 'web-stack-scan' });
+function readBody(req: IncomingMessage): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    req.on('data', (chunk: Buffer) => chunks.push(chunk));
+    req.on('end', () => resolve(Buffer.concat(chunks).toString('utf-8')));
+    req.on('error', reject);
   });
+}
 
-  // MCP JSON-RPC endpoint
-  app.post('/mcp', async (req: Request, res: Response, next: NextFunction) => {
-    try {
-      const request: JsonRpcRequest = req.body;
+/**
+ * Send a JSON response
+ */
+function sendJson(res: ServerResponse, statusCode: number, data: unknown): void {
+  const body = JSON.stringify(data);
+  res.writeHead(statusCode, {
+    'Content-Type': 'application/json',
+    'Content-Length': Buffer.byteLength(body),
+  });
+  res.end(body);
+}
 
-      if (!request.jsonrpc || request.jsonrpc !== '2.0') {
-        res.status(400).json({
-          jsonrpc: '2.0',
-          id: request.id || 0,
-          error: {
-            code: -32600,
-            message: 'Invalid Request: missing or invalid jsonrpc version',
-          },
-        });
-        return;
-      }
+/**
+ * Handle health check endpoint
+ */
+function handleHealthCheck(res: ServerResponse): void {
+  sendJson(res, 200, { status: 'ok', service: 'web-stack-scan' });
+}
 
-      const response = await handleRequest(request);
-      res.json(response);
-    } catch (error) {
-      next(error);
+/**
+ * Handle not found
+ */
+function handleNotFound(res: ServerResponse): void {
+  sendJson(res, 404, { error: 'Not found' });
+}
+
+/**
+ * Handle method not allowed
+ */
+function handleMethodNotAllowed(res: ServerResponse): void {
+  sendJson(res, 405, { error: 'Method not allowed' });
+}
+
+/**
+ * Handle MCP JSON-RPC endpoint
+ */
+async function handleMcpRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  try {
+    const body = await readBody(req);
+    const request: JsonRpcRequest = JSON.parse(body);
+
+    if (!request.jsonrpc || request.jsonrpc !== '2.0') {
+      sendJson(res, 400, {
+        jsonrpc: '2.0',
+        id: request.id || 0,
+        error: {
+          code: -32600,
+          message: 'Invalid Request: missing or invalid jsonrpc version',
+        },
+      });
+      return;
     }
-  });
 
-  // Direct REST endpoints for convenience
-  app.post('/api/fingerprint', async (req: Request, res: Response, next: NextFunction) => {
-    try {
-      const { url, timeout } = req.body;
-      if (!url) {
-        res.status(400).json({ error: 'Missing required parameter: url' });
-        return;
-      }
-      const result = await fingerprint(url, timeout);
-      res.json(result);
-    } catch (error) {
-      next(error);
-    }
-  });
-
-  app.post('/api/frameworks', (req: Request, res: Response, next: NextFunction) => {
-    try {
-      const { html, headers } = req.body;
-      if (!html) {
-        res.status(400).json({ error: 'Missing required parameter: html' });
-        return;
-      }
-      const result = detectFrameworks(html, headers);
-      res.json(result);
-    } catch (error) {
-      next(error);
-    }
-  });
-
-  app.post('/api/analytics', (req: Request, res: Response, next: NextFunction) => {
-    try {
-      const { html } = req.body;
-      if (!html) {
-        res.status(400).json({ error: 'Missing required parameter: html' });
-        return;
-      }
-      const result = detectAnalytics(html);
-      res.json(result);
-    } catch (error) {
-      next(error);
-    }
-  });
-
-  // Error handling middleware
-  app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
-    console.error('Server error:', err);
-    res.status(500).json({
+    const response = await handleJsonRpcRequest(request);
+    sendJson(res, 200, response);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    sendJson(res, 500, {
       ok: false,
-      error: err.message || 'Internal server error',
+      error: message,
     });
+  }
+}
+
+/**
+ * Handle REST API fingerprint endpoint
+ */
+async function handleFingerprintApi(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  try {
+    const body = await readBody(req);
+    const { url, timeout } = JSON.parse(body);
+
+    if (!url) {
+      sendJson(res, 400, { error: 'Missing required parameter: url' });
+      return;
+    }
+
+    const result = await fingerprint(url, timeout);
+    sendJson(res, 200, result);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    sendJson(res, 500, { ok: false, error: message });
+  }
+}
+
+/**
+ * Handle REST API frameworks endpoint
+ */
+async function handleFrameworksApi(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  try {
+    const body = await readBody(req);
+    const { html, headers } = JSON.parse(body);
+
+    if (!html) {
+      sendJson(res, 400, { error: 'Missing required parameter: html' });
+      return;
+    }
+
+    const result = detectFrameworks(html, headers);
+    sendJson(res, 200, result);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    sendJson(res, 500, { ok: false, error: message });
+  }
+}
+
+/**
+ * Handle REST API analytics endpoint
+ */
+async function handleAnalyticsApi(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  try {
+    const body = await readBody(req);
+    const { html } = JSON.parse(body);
+
+    if (!html) {
+      sendJson(res, 400, { error: 'Missing required parameter: html' });
+      return;
+    }
+
+    const result = detectAnalytics(html);
+    sendJson(res, 200, result);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    sendJson(res, 500, { ok: false, error: message });
+  }
+}
+
+/**
+ * Create and configure the HTTP server
+ */
+export function createHttpServer(): Server {
+  const httpServer = createServer();
+
+  httpServer.on('request', async (req: IncomingMessage, res: ServerResponse) => {
+    const url = new URL(req.url!, `http://${req.headers.host || 'localhost'}`);
+    const method = req.method?.toUpperCase();
+
+    try {
+      switch (url.pathname) {
+        case '/mcp':
+          if (method === 'POST') {
+            await handleMcpRequest(req, res);
+          } else {
+            handleMethodNotAllowed(res);
+          }
+          break;
+
+        case '/health':
+          if (method === 'GET') {
+            handleHealthCheck(res);
+          } else {
+            handleMethodNotAllowed(res);
+          }
+          break;
+
+        case '/api/fingerprint':
+          if (method === 'POST') {
+            await handleFingerprintApi(req, res);
+          } else {
+            handleMethodNotAllowed(res);
+          }
+          break;
+
+        case '/api/frameworks':
+          if (method === 'POST') {
+            await handleFrameworksApi(req, res);
+          } else {
+            handleMethodNotAllowed(res);
+          }
+          break;
+
+        case '/api/analytics':
+          if (method === 'POST') {
+            await handleAnalyticsApi(req, res);
+          } else {
+            handleMethodNotAllowed(res);
+          }
+          break;
+
+        default:
+          handleNotFound(res);
+      }
+    } catch (error) {
+      console.error('Server error:', error);
+      const message = error instanceof Error ? error.message : 'Internal server error';
+      sendJson(res, 500, { ok: false, error: message });
+    }
   });
 
-  return app;
+  return httpServer;
 }
 
 /**
  * Start the HTTP transport
  */
-export function startHttpTransport(config: Partial<ServerConfig> = {}): void {
+export function startHttpTransport(config: Partial<ServerConfig> = {}): Server {
   const { port, host } = { ...defaultServerConfig, ...config };
-  const app = createApp();
+  const httpServer = createHttpServer();
 
-  app.listen(port, host, () => {
+  httpServer.listen(port, host, () => {
     console.log(`web-stack-scan HTTP server listening on http://${host}:${port}`);
     console.log(`MCP endpoint: http://${host}:${port}/mcp`);
     console.log(`Health check: http://${host}:${port}/health`);
   });
+
+  return httpServer;
 }
